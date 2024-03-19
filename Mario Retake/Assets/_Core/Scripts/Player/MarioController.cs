@@ -1,5 +1,4 @@
 using System;
-using System.Data.SqlTypes;
 using UnityEngine;
 
 
@@ -14,6 +13,7 @@ public class MarioController : MonoBehaviour, IPlayer
     public float airControl;
     public float gravityScale;
     public LayerMask objectInteractLayer;
+    public LayerMask entityInteractLayer;
 
     Rigidbody2D _rb;
     WallDetector _wallDetector;
@@ -60,8 +60,6 @@ public class MarioController : MonoBehaviour, IPlayer
                 _wasOnAir = true;
         }
     }
-
-
 
 
     // Lifecycle methods
@@ -128,13 +126,34 @@ public class MarioController : MonoBehaviour, IPlayer
     {
         if (_groundDetector.IsGrounded && wasOnAir)
         {
+            print("Just landed");
 
+            bool shouldKnockback = false;
+            var hits = CastUtils.CastCollider
+                (
+                    _groundDetector.groundCollider,
+                    Vector2.down,
+                    0.05f,
+                    entityInteractLayer
+                );
+
+            foreach (var h in hits)
+            {
+                if (h.collider.TryGetComponent(out IEntity entity))
+                {
+                    entity.OnInteractBegin(new InteractionResult());
+                    shouldKnockback = true;
+                }
+            }
+
+            if (shouldKnockback)
+                _rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
         }
     }
 
 
     // Interfaces
-    
+
     public void OnInteractBegin(InteractionResult res)
     {
 
