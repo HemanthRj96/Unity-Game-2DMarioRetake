@@ -1,4 +1,5 @@
 using System;
+using Unity.VisualScripting;
 using UnityEngine;
 
 
@@ -20,6 +21,9 @@ public class MarioController : MonoBehaviour, IPlayer
     GroundDetector _groundDetector;
     bool _jumpTrigger = false;
     bool _wasOnAir = false;
+    bool _velocityControlLatch = false;
+    Vector3 _previousPosition;
+    Vector3 _direction;
 
 
     // Properties
@@ -73,10 +77,56 @@ public class MarioController : MonoBehaviour, IPlayer
 
     private void Start()
     {
+        _previousPosition = transform.position;
         _rb.gravityScale = gravityScale;
     }
 
     private void Update()
+    {
+        updateInput();
+    }
+
+
+    private void FixedUpdate()
+    {
+        updateDirection();
+
+        if (axis.x != 0)
+        {
+            if (!_wallDetector.IsHittingFront || !_wallDetector.IsHittingBack)
+                updateTransform();
+            _velocityControlLatch = true;
+        }
+        else
+        {
+            if (_velocityControlLatch)
+            {
+                float speed = 0;
+                if (_rb.velocity.sqrMagnitude == 0)
+                    speed = moveSpeed;
+                else
+                    speed = _rb.velocity.magnitude;
+
+                _rb.velocity = _direction * speed;
+                _velocityControlLatch = false;
+            }
+        }
+
+        if (jumpTrigger)
+            _rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
+    }
+
+
+    // Private methods
+
+    private void updateDirection()
+    {
+        _direction = transform.position - _previousPosition;
+        _direction.Normalize();
+        _previousPosition = transform.position;
+    }
+
+    private void updateInput()
     {
         wasOnAir = !_groundDetector.IsGrounded;
         axis = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
@@ -90,35 +140,23 @@ public class MarioController : MonoBehaviour, IPlayer
         tryStomping();
     }
 
-
-
-    private void FixedUpdate()
-    {
-        if (axis.x < 0 && !_wallDetector.IsHittingBack)
-            updateTransform();
-        else if (axis.x > 0 && !_wallDetector.IsHittingFront)
-            updateTransform();
-
-        if (jumpTrigger)
-            _rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
-    }
-
-
-    // Private methods
-
     private void updateTransform()
     {
-        if (_groundDetector.IsGrounded)
-            transform.position += Vector3.right * axis.x * Time.fixedDeltaTime * moveSpeed;
-        else
-            transform.position += Vector3.right * axis.x * Time.fixedDeltaTime * moveSpeed * airControl;
+        transform.position += Vector3.right * axis.x * Time.fixedDeltaTime * moveSpeed;
     }
 
     private void tryCrouching()
     {
-        var obj = CastUtils.CastRay<IObject>(transform.position, Vector2.down, 0.05f, objectInteractLayer);
-        if (obj != null)
-            obj.OnInteractBegin(new InteractionResult());
+        print("Crouch");
+        var hits = _groundDetector.GroundHits;
+
+        foreach (var h in hits)
+        {
+            if (h.collider != null && h.collider.TryGetComponent(out IObject obj))
+            {
+                obj.OnInteractBegin(new InteractionResult());
+            }
+        }
         _rb.gravityScale = 8 * gravityScale;
     }
 
@@ -126,20 +164,13 @@ public class MarioController : MonoBehaviour, IPlayer
     {
         if (_groundDetector.IsGrounded && wasOnAir)
         {
-            print("Just landed");
-
+            print("Stomp");
             bool shouldKnockback = false;
-            var hits = CastUtils.CastCollider
-                (
-                    _groundDetector.groundCollider,
-                    Vector2.down,
-                    0.05f,
-                    entityInteractLayer
-                );
+            var hits = _groundDetector.GroundHits;
 
             foreach (var h in hits)
             {
-                if (h.collider.TryGetComponent(out IEntity entity))
+                if (h.collider != null && h.collider.TryGetComponent(out IEntity entity))
                 {
                     entity.OnInteractBegin(new InteractionResult());
                     shouldKnockback = true;
@@ -147,7 +178,10 @@ public class MarioController : MonoBehaviour, IPlayer
             }
 
             if (shouldKnockback)
-                _rb.AddForce(Vector2.up * jumpForce, ForceMode2D.Impulse);
+            {
+                _rb.velocity = Vector3.zero;
+                _rb.AddForce(Vector2.up * jumpForce * 0.5f, ForceMode2D.Impulse);
+            }
         }
     }
 
